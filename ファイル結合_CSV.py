@@ -67,15 +67,48 @@ def get_order_database_path():
     
     return None
 
-def get_order_info_database_path():
+def get_order_data_database_path():
     """
-    発注情報DBの保存パスを取得する
-    
+    受注データDBの保存パスを取得する
+
     Returns:
         Path: 存在するデータベースフォルダパス、見つからない場合はNone
     """
     username = getpass.getuser()
-    
+
+    db_folder_paths = [
+        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ"
+    ]
+
+    for db_folder_path in db_folder_paths:
+        if os.path.exists(db_folder_path):
+            print(f"受注データDB フォルダが見つかりました: {db_folder_path}")
+            return Path(db_folder_path)
+
+    # パスが存在しない場合は作成を試行
+    for db_folder_path in db_folder_paths:
+        try:
+            os.makedirs(db_folder_path, exist_ok=True)
+            print(f"受注データDBフォルダを作成しました: {db_folder_path}")
+            return Path(db_folder_path)
+        except Exception as e:
+            print(f"フォルダ作成失敗: {db_folder_path} - {str(e)}")
+            continue
+
+    print("⚠️ 受注データDB フォルダが見つからず、作成もできませんでした")
+    return None
+
+def get_order_info_database_path():
+    """
+    発注情報DBの保存パスを取得する
+
+    Returns:
+        Path: 存在するデータベースフォルダパス、見つからない場合はNone
+    """
+    username = getpass.getuser()
+
     db_folder_paths = [
         f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\現場用\\DB\\発注情報",
         f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\現場用\\DB\\発注情報",
@@ -520,6 +553,244 @@ def create_order_status_database(csv_file_path):
         
     except Exception as e:
         print(f"⚠️ 受注案件状況確認DB作成処理でエラーが発生しました: {e}")
+        return False
+
+def init_order_data_database(db_file, header_columns):
+    """受注データデータベースを初期化（CSVヘッダーをカラム名として使用）"""
+    try:
+        # 既存のDBファイルを削除
+        if db_file.exists():
+            db_file.unlink()
+            print(f"既存のDBファイルを削除しました: {db_file}")
+
+        conn = sqlite3.connect(str(db_file))
+        cursor = conn.cursor()
+
+        # CSVヘッダーをカラム名として使用（ダブルクォートで囲んで特殊文字に対応）
+        columns_sql = ", ".join([f'"{col}" TEXT' for col in header_columns])
+
+        # テーブルを作成
+        cursor.execute(f"""
+            CREATE TABLE order_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                {columns_sql},
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+        print(f"受注データデータベースを初期化しました: {db_file}")
+
+    except Exception as e:
+        print(f"受注データデータベース初期化エラー: {str(e)}")
+        raise
+
+def create_order_data_database(csv_file_path):
+    """
+    受注CSVファイルから受注データDBを作成する（CSVと同内容）
+
+    Args:
+        csv_file_path: 処理対象のCSVファイルパス
+
+    Returns:
+        bool: 処理成功時True、失敗時False
+    """
+    try:
+        # データベース保存フォルダのパスを取得
+        db_folder = get_order_data_database_path()
+        if db_folder is None:
+            print("⚠️ 受注データDB フォルダが見つからないため、DB作成をスキップします")
+            return False
+
+        print("\n=== 受注データDB作成処理を開始 ===")
+
+        # データベースファイルパス
+        db_file_path = db_folder / "order_data.db"
+
+        # CSVファイルを読み込んでヘッダー行を取得
+        with open(csv_file_path, 'r', encoding='cp932') as csvfile:
+            csv_reader = csv.reader(csvfile)
+            header_row = next(csv_reader)
+            num_columns = len(header_row)
+            print(f"CSVカラム数: {num_columns}")
+
+        # データベース初期化（ヘッダー行をカラム名として使用）
+        init_order_data_database(db_file_path, header_row)
+
+        # データベースに接続
+        conn = sqlite3.connect(str(db_file_path))
+        cursor = conn.cursor()
+
+        # CSVファイルを読み込んでデータを挿入（ヘッダー行はスキップ）
+        with open(csv_file_path, 'r', encoding='cp932') as csvfile:
+            csv_reader = csv.reader(csvfile)
+            next(csv_reader)  # ヘッダー行をスキップ
+
+            inserted_count = 0
+            error_count = 0
+
+            # INSERT文を準備（カラム名はCSVヘッダーを使用）
+            placeholders = ", ".join(["?" for _ in range(num_columns)])
+            column_names = ", ".join([f'"{col}"' for col in header_row])
+            insert_sql = f"INSERT INTO order_data ({column_names}) VALUES ({placeholders})"
+
+            for row in csv_reader:
+                try:
+                    # 行のデータがnum_columns列に満たない場合は空文字で埋める
+                    while len(row) < num_columns:
+                        row.append("")
+
+                    # num_columnsを超える場合はnum_columns列までに制限
+                    if len(row) > num_columns:
+                        row = row[:num_columns]
+
+                    # データを挿入
+                    cursor.execute(insert_sql, row)
+                    inserted_count += 1
+
+                except Exception as e:
+                    error_count += 1
+                    print(f"⚠️ データ挿入エラー (行 {inserted_count + error_count}): {str(e)}")
+                    continue
+
+        # コミットして接続を閉じる
+        conn.commit()
+        conn.close()
+
+        # ファイルサイズを確認
+        db_size = db_file_path.stat().st_size
+
+        print(f"受注データDB作成完了!")
+        print(f"保存先: {db_file_path}")
+        print(f"挿入レコード数: {inserted_count:,} 件")
+        if error_count > 0:
+            print(f"エラー件数: {error_count:,} 件")
+        print(f"DBファイルサイズ: {db_size:,} bytes ({db_size/1024/1024:.2f} MB)")
+
+        return True
+
+    except Exception as e:
+        print(f"⚠️ 受注データDB作成処理でエラーが発生しました: {e}")
+        return False
+
+def init_purchase_order_data_database(db_file, header_columns):
+    """発注データデータベースを初期化（CSVヘッダーをカラム名として使用）"""
+    try:
+        # 既存のDBファイルを削除
+        if db_file.exists():
+            db_file.unlink()
+            print(f"既存のDBファイルを削除しました: {db_file}")
+
+        conn = sqlite3.connect(str(db_file))
+        cursor = conn.cursor()
+
+        # CSVヘッダーをカラム名として使用（ダブルクォートで囲んで特殊文字に対応）
+        columns_sql = ", ".join([f'"{col}" TEXT' for col in header_columns])
+
+        # テーブルを作成
+        cursor.execute(f"""
+            CREATE TABLE purchase_order_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                {columns_sql},
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+        print(f"発注データデータベースを初期化しました: {db_file}")
+
+    except Exception as e:
+        print(f"発注データデータベース初期化エラー: {str(e)}")
+        raise
+
+def create_purchase_order_data_database(csv_file_path):
+    """
+    発注CSVファイルから発注データDBを作成する（CSVと同内容）
+
+    Args:
+        csv_file_path: 処理対象のCSVファイルパス
+
+    Returns:
+        bool: 処理成功時True、失敗時False
+    """
+    try:
+        # データベース保存フォルダのパスを取得（Outstanding_orders.dbと同じフォルダ）
+        db_folder = get_outstanding_orders_database_path()
+        if db_folder is None:
+            print("⚠️ 発注データDB フォルダが見つからないため、DB作成をスキップします")
+            return False
+
+        print("\n=== 発注データDB作成処理を開始 ===")
+
+        # データベースファイルパス
+        db_file_path = db_folder / "purchase_order_data.db"
+
+        # CSVファイルを読み込んでヘッダー行を取得
+        with open(csv_file_path, 'r', encoding='cp932') as csvfile:
+            csv_reader = csv.reader(csvfile)
+            header_row = next(csv_reader)
+            num_columns = len(header_row)
+            print(f"CSVカラム数: {num_columns}")
+
+        # データベース初期化（ヘッダー行をカラム名として使用）
+        init_purchase_order_data_database(db_file_path, header_row)
+
+        # データベースに接続
+        conn = sqlite3.connect(str(db_file_path))
+        cursor = conn.cursor()
+
+        # CSVファイルを読み込んでデータを挿入（ヘッダー行はスキップ）
+        with open(csv_file_path, 'r', encoding='cp932') as csvfile:
+            csv_reader = csv.reader(csvfile)
+            next(csv_reader)  # ヘッダー行をスキップ
+
+            inserted_count = 0
+            error_count = 0
+
+            # INSERT文を準備（カラム名はCSVヘッダーを使用）
+            placeholders = ", ".join(["?" for _ in range(num_columns)])
+            column_names = ", ".join([f'"{col}"' for col in header_row])
+            insert_sql = f"INSERT INTO purchase_order_data ({column_names}) VALUES ({placeholders})"
+
+            for row in csv_reader:
+                try:
+                    # 行のデータがnum_columns列に満たない場合は空文字で埋める
+                    while len(row) < num_columns:
+                        row.append("")
+
+                    # num_columnsを超える場合はnum_columns列までに制限
+                    if len(row) > num_columns:
+                        row = row[:num_columns]
+
+                    # データを挿入
+                    cursor.execute(insert_sql, row)
+                    inserted_count += 1
+
+                except Exception as e:
+                    error_count += 1
+                    print(f"⚠️ データ挿入エラー (行 {inserted_count + error_count}): {str(e)}")
+                    continue
+
+        # コミットして接続を閉じる
+        conn.commit()
+        conn.close()
+
+        # ファイルサイズを確認
+        db_size = db_file_path.stat().st_size
+
+        print(f"発注データDB作成完了!")
+        print(f"保存先: {db_file_path}")
+        print(f"挿入レコード数: {inserted_count:,} 件")
+        if error_count > 0:
+            print(f"エラー件数: {error_count:,} 件")
+        print(f"DBファイルサイズ: {db_size:,} bytes ({db_size/1024/1024:.2f} MB)")
+
+        return True
+
+    except Exception as e:
+        print(f"⚠️ 発注データDB作成処理でエラーが発生しました: {e}")
         return False
 
 def init_shipping_database(db_file):
@@ -1552,24 +1823,32 @@ def merge_csv_files(file_paths):
             # 選択されたファイル名に応じて追加処理を実行
             employee_update_success = True
             db_creation_success = True
+            order_data_db_creation_success = True
             order_outstanding_success = True
-            outstanding_db_success = True  # 追加
+            outstanding_db_success = True
+            purchase_order_data_db_success = True
             shipping_db_creation_success = True
             purchase_price_db_creation_success = True
-            
+
             if selected_name == "【標準】_受注":
                 # 社員情報追加
                 employee_update_success = update_csv_with_employee_data(output_file)
-                
+
                 # 受注案件状況確認DB作成
                 db_creation_success = create_order_status_database(output_file)
+
+                # 受注データDB作成（CSVと同内容）
+                order_data_db_creation_success = create_order_data_database(output_file)
                 
             elif selected_name == "【標準】_発注":
                 # 発注残ファイル作成と発注情報DB作成
                 csv_success, db_success = process_order_outstanding_csv(output_file)
                 order_outstanding_success = csv_success
                 outstanding_db_success = db_success
-            
+
+                # 発注データDB作成（CSVと同内容）
+                purchase_order_data_db_success = create_purchase_order_data_database(output_file)
+
             elif selected_name == "【標準】_出荷":
                 # 出荷情報DB作成
                 shipping_db_creation_success = create_shipping_database(output_file)
@@ -1618,7 +1897,12 @@ def merge_csv_files(file_paths):
                     success_message += "\n✅ 受注案件状況確認DBの作成も完了しました"
                 else:
                     success_message += "\n⚠️ 受注案件状況確認DBの作成に失敗しました"
-            
+
+                if order_data_db_creation_success:
+                    success_message += "\n✅ 受注データDB(order_data.db)の作成も完了しました"
+                else:
+                    success_message += "\n⚠️ 受注データDBの作成に失敗しました"
+
             elif selected_name == "【標準】_発注":
                 if order_outstanding_success:
                     success_message += "\n✅ 発注残ファイル(Outstanding orders.csv)の作成も完了しました"
@@ -1629,6 +1913,11 @@ def merge_csv_files(file_paths):
                         success_message += "\n⚠️ Outstanding_orders.dbの作成に失敗しました"
                 else:
                     success_message += "\n⚠️ 発注残ファイル作成に失敗しました"
+
+                if purchase_order_data_db_success:
+                    success_message += "\n✅ 発注データDB(purchase_order_data.db)の作成も完了しました"
+                else:
+                    success_message += "\n⚠️ 発注データDBの作成に失敗しました"
             
             elif selected_name == "【標準】_出荷":
                 if shipping_db_creation_success:
@@ -1712,8 +2001,8 @@ def main():
     print("  ・重複ヘッダーを除去")
     print("  ・空行をスキップ")
     print("  ・指定フォルダに自動保存（上書き）")
-    print("  ・【標準】_受注の場合：社員情報を自動追加 + 受注案件状況確認DBを自動作成")
-    print("  ・【標準】_発注の場合：発注残ファイル(Outstanding orders.csv)を自動作成 + 発注情報DBを自動作成")
+    print("  ・【標準】_受注の場合：社員情報を自動追加 + 受注案件状況確認DBを自動作成 + 受注データDB(order_data.db)を自動作成")
+    print("  ・【標準】_発注の場合：発注残ファイル(Outstanding orders.csv)を自動作成 + 発注情報DBを自動作成 + 発注データDB(purchase_order_data.db)を自動作成")
     print("  ・【標準】_出荷の場合：出荷情報DB(shipped.db)を自動作成")
     print("  ・【標準】_仕入の場合：仕入単価DB(Purchase_price.db)を自動作成")
     print("  ・結合完了後、元ファイルを自動削除（削除対象外ファイルを除く）")
