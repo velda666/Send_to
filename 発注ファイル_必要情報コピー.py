@@ -13,11 +13,11 @@ addition_dict = {
    "1003": "_Oﾐﾀﾆ",
    "1004": "_Oﾀﾅｶ",
    "1005": "_Wﾖｺﾔﾏ",
-   "1006": "_Oﾌﾙﾐﾔ",
+   "1006": "_Wﾌﾙﾐﾔ",
    "1007": "_Kﾐﾅﾐﾊﾗ",
    "1008": "_Tﾌｼﾞｳ",
    "1009": "_Tｱﾗｲ",
-   "1010": "_Oﾌﾙﾐﾔ",
+   "1010": "_Wﾌﾙﾐﾔ",
    "1014": "_Wｳｴﾉ",
    "1016": "_Oｵｶﾑﾗ",
    "1025": "_Tｷﾀﾉ",
@@ -60,7 +60,7 @@ def copy_partial_filename_and_path(file_path):
                                        "A114-GZ", "A114-HK", "A114-QD", "A114-SG", "A114-SH", 
                                        "A114-SZ", "A114-TJ", "A114-XM"]
             ):
-                special_text = "1006_Oﾌﾙﾐﾔ_ｶｲｶﾞｲ"
+                special_text = "1006_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
             elif len(underscore_positions) >= 8 and "A042" in file_name[underscore_positions[7] + 1:underscore_positions[8]]:
                 special_text = "1008_ﾌｼﾞｳ_SW"
             elif len(underscore_positions) >= 8 and seventh_eighth_value == "A056-11":
