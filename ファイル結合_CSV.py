@@ -207,7 +207,7 @@ def init_outstanding_orders_database(db_file):
             db_file.unlink()
             print(f"既存のDBファイルを削除しました: {db_file}")
         
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
         
         # 280列のカラムを作成（column_1 から column_280）
@@ -256,7 +256,7 @@ def create_outstanding_orders_database(csv_file_path):
         init_outstanding_orders_database(db_file_path)
         
         # データベースに接続
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
         
         # CSVファイルを読み込んでデータを挿入
@@ -530,7 +530,7 @@ def create_order_status_database(csv_file_path):
             db_file_path.unlink()
             print(f"既存のDBファイルを削除しました: {db_file_path}")
         
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
         
         # テーブル作成（存在するカラムのみ）
@@ -596,7 +596,7 @@ def init_order_data_database(db_file, header_columns):
             db_file.unlink()
             print(f"既存のDBファイルを削除しました: {db_file}")
 
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
 
         # CSVヘッダーをカラム名として使用（ダブルクォートで囲んで特殊文字に対応）
@@ -652,7 +652,7 @@ def create_order_data_database(csv_file_path):
         init_order_data_database(db_file_path, header_row)
 
         # データベースに接続
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
 
         # CSVファイルを読み込んでデータを挿入（ヘッダー行はスキップ）
@@ -715,7 +715,7 @@ def init_purchase_order_data_database(db_file, header_columns):
             db_file.unlink()
             print(f"既存のDBファイルを削除しました: {db_file}")
 
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
 
         # CSVヘッダーをカラム名として使用（ダブルクォートで囲んで特殊文字に対応）
@@ -771,7 +771,7 @@ def create_purchase_order_data_database(csv_file_path):
         init_purchase_order_data_database(db_file_path, header_row)
 
         # データベースに接続
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
 
         # CSVファイルを読み込んでデータを挿入（ヘッダー行はスキップ）
@@ -834,7 +834,7 @@ def init_arrival_data_database(db_file, header_columns):
             db_file.unlink()
             print(f"既存のDBファイルを削除しました: {db_file}")
 
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
 
         # CSVヘッダーをカラム名として使用（ダブルクォートで囲んで特殊文字に対応）
@@ -890,7 +890,7 @@ def create_arrival_data_database(csv_file_path):
         init_arrival_data_database(db_file_path, header_row)
 
         # データベースに接続
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
 
         # CSVファイルを読み込んでデータを挿入（ヘッダー行はスキップ）
@@ -952,7 +952,7 @@ def init_shipping_database(db_file):
         db_dir = os.path.dirname(db_file)
         os.makedirs(db_dir, exist_ok=True)
         
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
         
         # 既存のテーブルを削除（テーブル構造変更に対応）
@@ -1037,7 +1037,7 @@ def create_shipping_database(csv_file_path):
             print(f"抽出対象カラム数: {len(column_indices)}/{len(target_columns)}")
         
         # データベースに接続
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
         
         # CSVファイルを再度読み込んでデータを挿入
@@ -1107,7 +1107,7 @@ def init_purchase_price_database(db_file):
             db_file.unlink()
             print(f"既存のDBファイルを削除しました: {db_file}")
         
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
         
         # テーブルを作成
@@ -1229,7 +1229,7 @@ def create_purchase_price_database(csv_file_path):
         
         # 第2パス：データベースへの挿入（赤伝対象を除外）
         print("\n--- データベースへの挿入開始 ---")
-        conn = sqlite3.connect(str(db_file_path))
+        conn = sqlite3.connect(str(db_file_path), timeout=30)
         cursor = conn.cursor()
         
         with open(csv_file_path, 'r', encoding='cp932') as csvfile:
@@ -1386,7 +1386,7 @@ def save_order_info_to_database(df):
             print("⚠️ 「摘要」カラムが見つかりません")
         
         # データベースに接続
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
         
         # 既存データを削除（全件入れ替え）
@@ -1489,7 +1489,7 @@ def init_order_info_database(db_file):
         db_dir = os.path.dirname(db_file)
         os.makedirs(db_dir, exist_ok=True)
         
-        conn = sqlite3.connect(str(db_file))
+        conn = sqlite3.connect(str(db_file), timeout=30)
         cursor = conn.cursor()
         
         # 既存のテーブルを削除（テーブル構造変更に対応）
@@ -1553,7 +1553,7 @@ def update_csv_with_employee_data(csv_file_path):
         print("\n=== 社員情報追加処理を開始 ===")
         
         # データベースに接続
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), timeout=30)
         cursor = conn.cursor()
         
         # Customer_listテーブルの存在確認（正しいテーブル名で確認）
