@@ -14,7 +14,7 @@ import sqlite3
 from copy import copy
 import gc  # ★ 追加
 import time  # ★ 追加
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 # 印刷ダイアログを表示するためのライブラリ
 try:
     import win32com.client
@@ -24,6 +24,7 @@ except ImportError:
     WIN32_AVAILABLE = False
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 def get_username():
     return os.getlogin()
 def find_csv_path():
@@ -434,6 +435,42 @@ def process_file(input_file):
                 img.height = px85
                 cell = f'H{row_obj.row + 1}'
                 add_image_center(ws, img, cell, center_x=True, center_y=False)
+        # 7-a) A列を精査: "出　荷　依　頼　書" と "摘要欄" の処理
+        title_marker = "出　荷　依　頼　書"
+        summary_marker = "摘要欄"
+
+        # "出　荷　依　頼　書" を検知: 下3・下11セルの末尾に"　様"を追加
+        for row_obj in ws['A']:
+            if row_obj.value is not None and str(row_obj.value).strip() == title_marker:
+                for offset in [3, 11]:
+                    target_cell = ws.cell(row=row_obj.row + offset, column=1)
+                    if target_cell.value is not None:
+                        val = str(target_cell.value)
+                        if not val.endswith("　様"):
+                            target_cell.value = val + "　様"
+
+        # "摘要欄" を検知: 1つ下に"梱包明細"が含まれていれば "要・梱包明細" を配置
+        for row_obj in ws['A']:
+            if row_obj.value is not None and str(row_obj.value).strip() == summary_marker:
+                below_cell = ws.cell(row=row_obj.row + 1, column=1)
+                if below_cell.value is not None and "梱包明細" in str(below_cell.value):
+                    # 上方向に遡って最初の"出　荷　依　頼　書"を探す
+                    found_title_row = None
+                    for r in range(row_obj.row - 1, 0, -1):
+                        cell_val = ws.cell(row=r, column=1).value
+                        if cell_val is not None and str(cell_val).strip() == title_marker:
+                            found_title_row = r
+                            break
+                    if found_title_row is not None:
+                        # "出　荷　依　頼　書"セルの7つ右 = A列(1) + 7 = 8列(H列)
+                        mark_cell = ws.cell(row=found_title_row, column=8)
+                        mark_cell.value = "要・梱包明細"
+                        mark_cell.font = Font(bold=True, size=16, color="000000")
+                        mark_cell.fill = PatternFill(fill_type=None)
+                        mark_cell.alignment = Alignment(horizontal="center", vertical="center")
+                        thick = Side(style="thick")
+                        mark_cell.border = Border(left=thick, right=thick, top=thick, bottom=thick)
+
         # 8) 保存先ディレクトリの特定
         save_dir = get_save_directory(original_code_value)
         if not save_dir:
