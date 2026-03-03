@@ -14,7 +14,7 @@ import sqlite3
 from copy import copy
 import gc  # ★ 追加
 import time  # ★ 追加
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 # 印刷ダイアログを表示するためのライブラリ
 try:
     import win32com.client
@@ -52,7 +52,7 @@ def find_change_list_db_path():
     possible_paths = [
         f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\請求_発注データ照合\\YEinvoice_TYTorder_Verifi.db",
         f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\請求_発注データ照合\\YEinvoice_TYTorder_Verifi.db",
-        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ - CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\請求_発注データ照合\\YEinvoice_TYTorder_Verifi.db"
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\請求_発注データ照合\\YEinvoice_TYTorder_Verifi.db"
     ]
     for path in possible_paths:
         if os.path.exists(path):
@@ -63,7 +63,7 @@ def find_update_directory():
     possible_paths = [
         f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\出荷依頼書ファイル整形\\update",
         f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\出荷依頼書ファイル整形\\update",
-        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ - CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\出荷依頼書ファイル整形\\update"
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\出荷依頼書ファイル整形\\update"
     ]
     for path in possible_paths:
         if os.path.exists(path):
