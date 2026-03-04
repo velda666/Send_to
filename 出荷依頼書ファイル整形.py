@@ -14,7 +14,7 @@ import sqlite3
 from copy import copy
 import gc  # ★ 追加
 import time  # ★ 追加
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.4"
 # 印刷ダイアログを表示するためのライブラリ
 try:
     import win32com.client
@@ -25,6 +25,7 @@ except ImportError:
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.worksheet.page import PageMargins
 def get_username():
     return os.getlogin()
 def find_csv_path():
@@ -241,7 +242,7 @@ def add_image_center(ws, img, cell_address, center_x=True, center_y=True):
     ws.add_image(img, anchor)
 def get_save_directory(original_code):
     """
-    H13セルの置換前の値(例: "11", "12", "13", "16")から、
+    H10セルの置換前の値(例: "11", "12", "13", "16")から、
     該当のディレクトリ候補をリストで返し、存在するパスを返す。
     該当パスがなければ None を返す。
     """
@@ -290,8 +291,8 @@ def process_file(input_file):
         shutil.copy2(input_file, temp_output_file)
         wb = openpyxl.load_workbook(temp_output_file)
         ws = wb.active
-        # 1) H13セル(置換前コード)
-        original_code_cell = ws.cell(row=13, column=8)  # H13
+        # 1) H10セル(置換前コード)
+        original_code_cell = ws.cell(row=10, column=8)  # H10
         original_code_value = str(original_code_cell.value) if original_code_cell.value else ""
         # 2) 出荷依頼番号一覧から最小/最大取得
         shipping_numbers = []
@@ -359,6 +360,47 @@ def process_file(input_file):
                 if not matching_row.empty:
                     ws.cell(row=current_row, column=7).value = matching_row.iloc[0]['発注番号']
                 current_row += 1
+        # 5-b) 発注番号の最頻値を求め【発注番号(代表)】を更新
+        # A列から摘要欄の行番号リストを収集
+        summary_row_list = []
+        for row_obj in ws['A']:
+            if row_obj.value is not None and str(row_obj.value).strip() == "摘要欄":
+                summary_row_list.append(row_obj.row)
+        for order_number_row in order_number_rows:
+            # このセクションに対応する直近の摘要欄行を探す（下方向）
+            target_summary_row = None
+            for sr in summary_row_list:
+                if sr > order_number_row:
+                    target_summary_row = sr
+                    break
+            if target_summary_row is None:
+                continue
+            # G列の走査範囲: ヘッダ行+1 ～ 摘要欄行-2
+            scan_start = order_number_row + 1
+            scan_end = target_summary_row - 2
+            if scan_start > scan_end:
+                continue
+            # 範囲内のG列値を収集し最頻値を求める
+            g_values = []
+            for r in range(scan_start, scan_end + 1):
+                val = ws.cell(row=r, column=7).value
+                if val is not None and str(val).strip():
+                    g_values.append(str(val).strip())
+            if not g_values:
+                continue
+            freq = {}
+            for v in g_values:
+                freq[v] = freq.get(v, 0) + 1
+            most_common_value = max(freq, key=freq.get)
+            # 同範囲のC列で【発注番号(代表)】を探し、D列と比較・更新
+            for r in range(order_number_row, target_summary_row + 1):
+                c_val = ws.cell(row=r, column=3).value
+                if c_val is not None and str(c_val).strip() == "【発注番号(代表)】":
+                    d_cell = ws.cell(row=r, column=4)
+                    current_d = str(d_cell.value).strip() if d_cell.value is not None else ""
+                    if current_d != most_common_value:
+                        d_cell.value = most_common_value
+                    break
         # 6) ロット番号QR (ロット番号 + '_' + 出荷数量) 85px（行高さギリギリ）
         # 6) Match G+B with Change_list(Destination+Item_number), then rewrite G
         db_path = find_change_list_db_path()
@@ -442,7 +484,7 @@ def process_file(input_file):
         # "出　荷　依　頼　書" を検知: 下3・下11セルの末尾に"　様"を追加
         for row_obj in ws['A']:
             if row_obj.value is not None and str(row_obj.value).strip() == title_marker:
-                for offset in [3, 11]:
+                for offset in [3, 12]:
                     target_cell = ws.cell(row=row_obj.row + offset, column=1)
                     if target_cell.value is not None:
                         val = str(target_cell.value)
@@ -465,8 +507,8 @@ def process_file(input_file):
                         # "出　荷　依　頼　書"セルの7つ右 = A列(1) + 7 = 8列(H列)
                         mark_cell = ws.cell(row=found_title_row, column=8)
                         mark_cell.value = "要・梱包明細"
-                        mark_cell.font = Font(bold=True, size=16, color="000000")
-                        mark_cell.fill = PatternFill(fill_type=None)
+                        mark_cell.font = Font(bold=True, size=16, color="FFFFFF")
+                        mark_cell.fill = PatternFill(fill_type="solid", fgColor="000000")
                         mark_cell.alignment = Alignment(horizontal="center", vertical="center")
                         thick = Side(style="thick")
                         mark_cell.border = Border(left=thick, right=thick, top=thick, bottom=thick)
@@ -474,13 +516,22 @@ def process_file(input_file):
         # 8) 保存先ディレクトリの特定
         save_dir = get_save_directory(original_code_value)
         if not save_dir:
-            messagebox.showerror("エラー", f"H13セルの値({original_code_value})に対応する保存先フォルダが見つかりません。")
+            messagebox.showerror("エラー", f"H10セルの値({original_code_value})に対応する保存先フォルダが見つかりません。")
             return
         # 8-1) "YYMMDD" フォルダを作成 (なければ)
         date_folder = os.path.join(save_dir, today_str)
         if not os.path.exists(date_folder):
             os.makedirs(date_folder)
         final_output_file = os.path.join(date_folder, output_filename)
+        # 8-2) 印刷余白設定 (cm → inch: /2.54)
+        ws.page_margins = PageMargins(
+            top=2.0 / 2.54,     # 2.0cm
+            left=1.5 / 2.54,    # 1.5cm
+            right=1.5 / 2.54,   # 1.5cm
+            bottom=0.6 / 2.54,  # 0.6cm
+            header=2.0 / 2.54,  # 2.0cm
+            footer=0.9 / 2.54   # 0.9cm
+        )
         # 9) 保存
         wb.save(final_output_file)
         wb.close()
