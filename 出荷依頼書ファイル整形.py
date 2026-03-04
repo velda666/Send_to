@@ -14,7 +14,7 @@ import sqlite3
 from copy import copy
 import gc  # ★ 追加
 import time  # ★ 追加
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 # 印刷ダイアログを表示するためのライブラリ
 try:
     import win32com.client
@@ -102,7 +102,7 @@ def check_and_apply_update_on_start():
         latest_version = parse_version(latest_version_text)
         current_version = parse_version(APP_VERSION)
         if not latest_version or not current_version:
-            messagebox.showerror("Update Error", "Version format is invalid. Update check cannot continue.")
+            messagebox.showerror("アップデートエラー", "バージョン形式が不正です。アップデート確認を続行できません。")
             return True
         if latest_version <= current_version:
             return False
@@ -111,16 +111,16 @@ def check_and_apply_update_on_start():
         update_script = os.path.join(update_dir, current_script.name)
         if not os.path.exists(update_script):
             messagebox.showerror(
-                "Update Error",
-                f"Update is required (latest: {latest_version_text}), but update script is missing:\n{update_script}"
+                "アップデートエラー",
+                f"アップデートが必要です（最新: {latest_version_text}）が、更新ファイルが見つかりません：\n{update_script}"
             )
             return True
 
         shutil.copy2(update_script, current_script)
-        messagebox.showinfo("Update Complete", f"Updated to version {latest_version_text}.\nPlease restart the app.")
+        messagebox.showinfo("アップデート完了", f"プログラムに更新があり、[バージョン{latest_version_text}]にアップデートを完了しました。\nお手数ですが再度ファイルの右クリックからの操作を行って下さい。")
         return True
     except Exception as e:
-        messagebox.showerror("Update Error", f"Auto-update failed.\n{e}")
+        messagebox.showerror("アップデートエラー", f"自動アップデートに失敗しました。\n{e}")
         return True
 
 def normalize_lookup_value(value):
