@@ -14,7 +14,7 @@ import sqlite3
 from copy import copy
 import gc  # ★ 追加
 import time  # ★ 追加
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 # 印刷ダイアログを表示するためのライブラリ
 try:
     import win32com.client
@@ -392,14 +392,11 @@ def process_file(input_file):
             for v in g_values:
                 freq[v] = freq.get(v, 0) + 1
             most_common_value = max(freq, key=freq.get)
-            # 同範囲のC列で【発注番号(代表)】を探し、D列と比較・更新
-            for r in range(order_number_row, target_summary_row + 1):
+            # 発注番号ヘッダより上方向にC列で【発注番号(代表)】を探し、D列に書き込む
+            for r in range(order_number_row - 1, 0, -1):
                 c_val = ws.cell(row=r, column=3).value
                 if c_val is not None and str(c_val).strip() == "【発注番号(代表)】":
-                    d_cell = ws.cell(row=r, column=4)
-                    current_d = str(d_cell.value).strip() if d_cell.value is not None else ""
-                    if current_d != most_common_value:
-                        d_cell.value = most_common_value
+                    ws.cell(row=r, column=4).value = most_common_value
                     break
         # 6) ロット番号QR (ロット番号 + '_' + 出荷数量) 85px（行高さギリギリ）
         # 6) Match G+B with Change_list(Destination+Item_number), then rewrite G
