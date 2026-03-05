@@ -13,7 +13,7 @@ import sqlite3
 from copy import copy
 import gc  # ★ 追加
 import time  # ★ 追加
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 # 印刷ダイアログを表示するためのライブラリ
 try:
     import win32com.client
@@ -340,11 +340,28 @@ def process_file(input_file):
             for i, row_data in enumerate(sort_data):
                 for j, value in enumerate(row_data):
                     ws.cell(row=line_number_row + 1 + i, column=j + 1).value = value
-        # 5) 発注番号ヘッダ行の収集（G列の値はそのまま保持）
+        # 5) 入荷CSV読み込み・発注番号の補完（G列が空欄の場合のみ）
+        csv_path = find_csv_path()
+        df_nyuka = None
+        if csv_path:
+            import pandas as pd
+            df_nyuka = pd.read_csv(csv_path, encoding='cp932', low_memory=False)
         order_number_rows = []
         for row_obj in ws['G']:
             if row_obj.value == "発注番号":
                 order_number_rows.append(row_obj.row)
+        if df_nyuka is not None:
+            for order_number_row in order_number_rows:
+                current_row = order_number_row + 1
+                while ws.cell(row=current_row, column=6).value is not None:
+                    g_cell = ws.cell(row=current_row, column=7)
+                    # G列が空欄の場合のみ入荷CSVから補完
+                    if g_cell.value is None or str(g_cell.value).strip() == "":
+                        lot_number = str(ws.cell(row=current_row, column=6).value)
+                        matching_row = df_nyuka[df_nyuka['明細_ロット番号'] == lot_number]
+                        if not matching_row.empty:
+                            g_cell.value = matching_row.iloc[0]['発注番号']
+                    current_row += 1
         # 5-b) 発注番号の最頻値を求め【発注番号(代表)】を更新
         # A列から摘要欄の行番号リストを収集
         summary_row_list = []
