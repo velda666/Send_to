@@ -55,12 +55,19 @@ def copy_partial_filename_and_path(file_path):
             if special_text_key == "1003" and check_value == "BJF3C":
                 special_text = "1003_Oﾐﾀﾆ_COSCO"
             elif special_text_key == "1006" and (
-                check_value in ["63G50", "63G51", "BJF3C"] or 
-                seventh_eighth_value in ["A104-11", "A104-12", "A114-11", "A114-CS", "A114-DL", 
-                                       "A114-GZ", "A114-HK", "A114-QD", "A114-SG", "A114-SH", 
+                check_value in ["63G50", "63G51", "BJF3C"] or
+                seventh_eighth_value in ["A104-11", "A104-12", "A114-11", "A114-CS", "A114-DL",
+                                       "A114-GZ", "A114-HK", "A114-QD", "A114-SG", "A114-SH",
                                        "A114-SZ", "A114-TJ", "A114-XM"]
             ):
                 special_text = "1006_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
+            elif special_text_key == "1010" and (
+                check_value in ["63G50", "63G51", "BJF3C"] or
+                seventh_eighth_value in ["A104-11", "A104-12", "A114-11", "A114-CS", "A114-DL",
+                                       "A114-GZ", "A114-HK", "A114-QD", "A114-SG", "A114-SH",
+                                       "A114-SZ", "A114-TJ", "A114-XM"]
+            ):
+                special_text = "1010_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
             elif len(underscore_positions) >= 8 and "A042" in file_name[underscore_positions[7] + 1:underscore_positions[8]]:
                 special_text = "1008_ﾌｼﾞｳ_SW"
             elif len(underscore_positions) >= 8 and seventh_eighth_value == "A056-11":
