@@ -13,7 +13,7 @@ addition_dict = {
    "1003": "_Oﾐﾀﾆ",
    "1004": "_Oﾀﾅｶ",
    "1005": "_Wﾖｺﾔﾏ",
-   "1006": "_Wﾌﾙﾐﾔ",
+   "1006": "_Oﾌﾙﾐﾔ",
    "1007": "_Kﾐﾅﾐﾊﾗ",
    "1008": "_Tﾌｼﾞｳ",
    "1009": "_Tｱﾗｲ",
@@ -51,9 +51,10 @@ def copy_partial_filename_and_path(file_path):
             seventh_eighth_value = ""
             if len(underscore_positions) >= 8:
                 seventh_eighth_value = file_name[underscore_positions[7] + 1:underscore_positions[8]]
-            
+            # 倉庫の要望でCOSCOはミタニ表記
             if special_text_key == "1003" and check_value == "BJF3C":
                 special_text = "1003_Oﾐﾀﾆ_COSCO"
+            # 国内古宮コード。念の為、海外得意先を条件として追加。過渡期対策。新中鈴は三谷表示有線のため機能しないが念の為    
             elif special_text_key == "1006" and (
                 check_value in ["63G50", "63G51", "BJF3C"] or
                 seventh_eighth_value in ["A104-11", "A104-12", "A114-11", "A114-CS", "A114-DL",
@@ -62,10 +63,8 @@ def copy_partial_filename_and_path(file_path):
             ):
                 special_text = "1006_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
             elif special_text_key == "1010" and (
-                check_value in ["63G50", "63G51", "BJF3C"] or
-                seventh_eighth_value in ["A104-11", "A104-12", "A114-11", "A114-CS", "A114-DL",
-                                       "A114-GZ", "A114-HK", "A114-QD", "A114-SG", "A114-SH",
-                                       "A114-SZ", "A114-TJ", "A114-XM"]
+                check_value in ["63G50", "63G51"] or
+                seventh_eighth_value in ["A104-11", "A104-12"]
             ):
                 special_text = "1010_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
             elif len(underscore_positions) >= 8 and "A042" in file_name[underscore_positions[7] + 1:underscore_positions[8]]:
