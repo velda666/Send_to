@@ -54,7 +54,7 @@ def copy_partial_filename_and_path(file_path):
             # 倉庫の要望でCOSCOはミタニ表記
             if special_text_key == "1003" and check_value == "BJF3C":
                 special_text = "1003_Oﾐﾀﾆ_COSCO"
-            # 国内古宮コード。念の為、海外得意先を条件として追加。過渡期対策。新中鈴は三谷表示有線のため機能しないが念の為    
+            # 国内古宮コード。念の為、海外得意先を条件として追加。過渡期対策。新中鈴は三谷表示優先のため機能しないが念の為    
             elif special_text_key == "1006" and (
                 check_value in ["63G50", "63G51", "BJF3C"] or
                 seventh_eighth_value in ["A104-11", "A104-12", "A114-11", "A114-CS", "A114-DL",
