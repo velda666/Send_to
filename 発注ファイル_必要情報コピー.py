@@ -1,10 +1,18 @@
 import sys
 import os
+import getpass
+import shutil
+import subprocess
+import winreg
 import pyperclip
 import time
 from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
+
+# アプリケーションバージョン
+APP_VERSION = "1.1.2"
+APP_NAME = "発注ファイル_必要情報コピー"
 
 # 旧担当者案件も残っている可能性があるため、片平両名・荒井氏・酒井氏のコードは暫く残しておく
 addition_dict = {
@@ -67,6 +75,8 @@ def copy_partial_filename_and_path(file_path):
                 seventh_eighth_value in ["A104-11", "A104-12"]
             ):
                 special_text = "1010_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
+            elif seventh_eighth_value in ["A112-11", "A111-11", "A111-12", "A111-13", "A111-14"]:
+                special_text = "1014_Wｳｴﾉ_ｶｲｶﾞｲ"
             elif len(underscore_positions) >= 8 and "A042" in file_name[underscore_positions[7] + 1:underscore_positions[8]]:
                 special_text = "1008_ﾌｼﾞｳ_SW"
             elif len(underscore_positions) >= 8 and seventh_eighth_value == "A056-11":
@@ -107,6 +117,175 @@ def move_file(file_path):
    target_path = os.path.join(target_directory, new_file_name)
    os.rename(file_path, target_path)
    print(f"Moved file to: {target_path}")
+
+# -------------------------------------------------------
+# アップデート関連関数
+# -------------------------------------------------------
+REGISTRY_KEY_PATH = r"SOFTWARE\TohoYanmar\OrderFileCopyApp"
+
+def get_update_folder_path():
+    """アップデート用フォルダのパスを取得する"""
+    username = getpass.getuser()
+    candidate_paths = [
+        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\発注ファイル_必要情報コピー\\update",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\発注ファイル_必要情報コピー\\update",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\発注ファイル_必要情報コピー\\update",
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+def get_registry_value(value_name, default=None):
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH, 0, winreg.KEY_READ)
+        value, _ = winreg.QueryValueEx(key, value_name)
+        winreg.CloseKey(key)
+        return value
+    except FileNotFoundError:
+        return default
+    except Exception:
+        return default
+
+def set_registry_value(value_name, value):
+    try:
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY_PATH)
+        winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ, str(value))
+        winreg.CloseKey(key)
+    except Exception:
+        pass
+
+def get_skip_count(version):
+    skip_info = get_registry_value("SkipInfo", "")
+    if skip_info:
+        try:
+            parts = skip_info.split("|")
+            if len(parts) == 2 and parts[0] == version:
+                return int(parts[1])
+        except Exception:
+            pass
+    return 0
+
+def set_skip_count(version, count):
+    set_registry_value("SkipInfo", f"{version}|{count}")
+
+def reset_skip_count():
+    set_registry_value("SkipInfo", "")
+
+def compare_versions(version1, version2):
+    """version1 > version2 なら正、等しければ0、小さければ負を返す"""
+    def parse_version(v):
+        return [int(x) for x in v.split('.')]
+    v1_parts = parse_version(version1)
+    v2_parts = parse_version(version2)
+    for v1_val, v2_val in zip(v1_parts, v2_parts):
+        if v1_val > v2_val:
+            return 1
+        elif v1_val < v2_val:
+            return -1
+    return 0
+
+def get_latest_version():
+    update_folder = get_update_folder_path()
+    if not update_folder:
+        return None
+    version_file = os.path.join(update_folder, "version.txt")
+    if not os.path.exists(version_file):
+        return None
+    try:
+        with open(version_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return None
+
+def perform_update():
+    """アップデートを実行する"""
+    update_folder = get_update_folder_path()
+    if not update_folder:
+        messagebox.showerror("エラー", "アップデート用フォルダが見つかりません。")
+        return False
+
+    is_frozen = getattr(sys, 'frozen', False)
+    if is_frozen:
+        current_script = sys.executable
+    else:
+        current_script = os.path.abspath(__file__)
+
+    update_source = os.path.join(update_folder, os.path.basename(current_script))
+    if not os.path.exists(update_source):
+        messagebox.showerror("エラー", f"アップデートファイルが見つかりません:\n{update_source}")
+        return False
+
+    try:
+        if not is_frozen:
+            shutil.copy2(update_source, current_script)
+            reset_skip_count()
+            messagebox.showinfo("アップデート完了", "アップデートが完了しました。\nアプリケーションを再起動します。")
+            subprocess.Popen([sys.executable, current_script, "--just-updated"] + sys.argv[1:])
+            return True
+        else:
+            batch_content = f'''@echo off
+timeout /t 2 /nobreak > nul
+copy /Y "{update_source}" "{current_script}"
+start "" "{current_script}" --just-updated
+del "%~f0"
+'''
+            batch_path = os.path.join(os.path.dirname(current_script), "update_temp.bat")
+            with open(batch_path, 'w', encoding='shift_jis') as f:
+                f.write(batch_content)
+            reset_skip_count()
+            subprocess.Popen(batch_path, shell=True)
+            return True
+    except Exception as e:
+        messagebox.showerror("エラー", f"アップデート中にエラーが発生しました:\n{str(e)}")
+        return False
+
+def check_for_updates(root=None):
+    """起動時にアップデートをチェックする"""
+    if "--just-updated" in sys.argv:
+        return False
+
+    latest_version = get_latest_version()
+    if latest_version is None:
+        return False
+
+    if compare_versions(latest_version, APP_VERSION) <= 0:
+        return False
+
+    skip_count = get_skip_count(latest_version)
+
+    if skip_count >= 2:
+        messagebox.showinfo(
+            "アップデート必須",
+            f"新しいバージョン {latest_version} が利用可能です。\n"
+            f"現在のバージョン: {APP_VERSION}\n\n"
+            "アップデートを延期できる回数を超えました。\n"
+            "アップデートを実行します。"
+        )
+        if perform_update():
+            if root:
+                root.destroy()
+            sys.exit(0)
+    else:
+        remaining = 2 - skip_count
+        result = messagebox.askyesno(
+            "アップデート確認",
+            f"新しいバージョン {latest_version} が利用可能です。\n"
+            f"現在のバージョン: {APP_VERSION}\n\n"
+            f"今すぐアップデートしますか？\n\n"
+            f"（「いいえ」を選択した場合、残り{remaining}回まで延期できます）"
+        )
+        if result:
+            if perform_update():
+                if root:
+                    root.destroy()
+                sys.exit(0)
+        else:
+            set_skip_count(latest_version, skip_count + 1)
+
+    return False
+
+# -------------------------------------------------------
 
 class FileMoveTool:
    def __init__(self, file_path):
@@ -152,10 +331,22 @@ class FileMoveTool:
        self.root.mainloop()
 
 if __name__ == "__main__":
+   # アップデートチェック
+   temp_root = tk.Tk()
+   temp_root.withdraw()
+   check_for_updates(temp_root)
+   try:
+       temp_root.destroy()
+   except Exception:
+       pass
+
    if len(sys.argv) > 1:
-       file_path = sys.argv[1]
-       copy_partial_filename_and_path(file_path)
-       app = FileMoveTool(file_path)
-       app.run()
+       # --just-updated フラグを除いた引数からファイルパスを取得
+       args = [a for a in sys.argv[1:] if a != "--just-updated"]
+       if args:
+           file_path = args[0]
+           copy_partial_filename_and_path(file_path)
+           app = FileMoveTool(file_path)
+           app.run()
    else:
        print("No file path provided.")
