@@ -3,6 +3,7 @@ import os
 import csv
 import getpass
 import shutil
+import subprocess
 import sqlite3
 import pandas as pd
 from pathlib import Path
@@ -13,7 +14,119 @@ from tkinter import ttk
 import time
 import threading
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.3"
+APP_NAME = "ファイル結合_CSVアプリ"
+
+def get_update_folder_path():
+    """
+    OneDrive上のアップデート用フォルダパスを取得する
+    """
+    username = getpass.getuser()
+    candidate_paths = [
+        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\ファイル結合_CSVアプリ\\update",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\ファイル結合_CSVアプリ\\update",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\業務用pythonアプリ最新版\\ファイル結合_CSVアプリ\\update",
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+def parse_version(version_text):
+    version_text = (version_text or "").strip()
+    if not version_text:
+        return ()
+    parts = []
+    for token in version_text.split("."):
+        try:
+            parts.append(int(token))
+        except ValueError:
+            return ()
+    return tuple(parts)
+
+def get_latest_version_text():
+    """
+    update/version.txt 先頭行のバージョン文字列を返す
+    """
+    update_folder = get_update_folder_path()
+    if not update_folder:
+        return None
+    version_file = os.path.join(update_folder, "version.txt")
+    if not os.path.exists(version_file):
+        return None
+    try:
+        with open(version_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    return line
+        return None
+    except Exception:
+        return None
+
+def perform_self_update(latest_version_text):
+    """
+    updateフォルダ内の同名スクリプトで自身を更新する
+    """
+    update_folder = get_update_folder_path()
+    if not update_folder:
+        messagebox.showerror("アップデートエラー", "アップデート用フォルダが見つかりません。")
+        return False
+
+    is_frozen = getattr(sys, "frozen", False)
+    current_script = sys.executable if is_frozen else str(Path(__file__).resolve())
+    update_source = os.path.join(update_folder, os.path.basename(current_script))
+    if not os.path.exists(update_source):
+        messagebox.showerror("アップデートエラー", f"更新ファイルが見つかりません:\n{update_source}")
+        return False
+
+    try:
+        if not is_frozen:
+            shutil.copy2(update_source, current_script)
+            messagebox.showinfo(
+                "アップデート完了",
+                f"{APP_NAME} を v{latest_version_text} に更新しました。\nお手数ですが再度ファイルの右クリックから実行してください。"
+            )
+            return True
+
+        batch_content = f'''@echo off
+timeout /t 2 /nobreak > nul
+copy /Y "{update_source}" "{current_script}"
+start "" "{current_script}" --just-updated
+del "%~f0"
+'''
+        batch_path = os.path.join(os.path.dirname(current_script), "update_temp_csv_merge.bat")
+        with open(batch_path, "w", encoding="shift_jis") as f:
+            f.write(batch_content)
+        subprocess.Popen(batch_path, shell=True)
+        return True
+    except Exception as e:
+        messagebox.showerror("アップデートエラー", f"自動アップデートに失敗しました。\n{e}")
+        return False
+
+def check_for_updates_on_start():
+    """
+    起動時にversion.txtを確認し、更新があれば適用する
+    Returns:
+        bool: 更新を適用して処理中断すべき場合True
+    """
+    if "--just-updated" in sys.argv:
+        return False
+
+    latest_version_text = get_latest_version_text()
+    if not latest_version_text:
+        return False
+
+    latest_version = parse_version(latest_version_text)
+    current_version = parse_version(APP_VERSION)
+    if not latest_version or not current_version:
+        messagebox.showerror("アップデートエラー", "version.txt のバージョン形式が不正です。")
+        return True
+
+    if latest_version <= current_version:
+        return False
+
+    return perform_self_update(latest_version_text)
 
 def get_database_path():
     """
@@ -2480,8 +2593,21 @@ def merge_csv_files(file_paths):
         root.destroy()
 
 def main():
+    # 起動時の自動アップデート確認
+    temp_root = tk.Tk()
+    temp_root.withdraw()
+    try:
+        if check_for_updates_on_start():
+            temp_root.destroy()
+            return
+    finally:
+        try:
+            temp_root.destroy()
+        except Exception:
+            pass
+
     # コマンドライン引数からファイルパスを取得
-    file_paths = sys.argv[1:]
+    file_paths = [arg for arg in sys.argv[1:] if arg != "--just-updated"]
     
     if not file_paths:
         # GUI環境でエラー表示
