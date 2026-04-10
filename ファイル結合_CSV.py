@@ -13,6 +13,8 @@ from tkinter import ttk
 import time
 import threading
 
+APP_VERSION = "1.0.1"
+
 def get_database_path():
     """
     Customer_List.dbのパスを取得する
@@ -1734,6 +1736,267 @@ def get_output_folder(selected_filename):
     
     return None
 
+def get_product_label_data_save_path():
+    """
+    製品ラベル用データファイル.csvの保存先パスを取得する
+
+    Returns:
+        Path: 保存ファイルパス、見つからない場合はNone
+    """
+    username = getpass.getuser()
+
+    save_dir_candidates = [
+        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\現場用\\製品用ラベル用データ",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\現場用\\製品用ラベル用データ",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\現場用\\製品用ラベル用データ"
+    ]
+
+    for save_dir in save_dir_candidates:
+        if os.path.exists(save_dir):
+            return Path(save_dir) / "製品ラベル用データファイル.csv"
+
+    return None
+
+def should_apply_arrival_label_append(file_paths):
+    """
+    入荷特例（製品ラベル用データ追記）を適用する条件を満たすか判定する
+    条件:
+      1. 選択ファイル数が2
+      2. 2ファイルが同一フォルダにあり、そのフォルダ名が「入荷実績」
+      3. 2ファイルのうち1つが「【標準】_入荷.csv」
+    """
+    if len(file_paths) != 2:
+        return False
+
+    path_objs = [Path(p) for p in file_paths]
+    parent_folders = {p.parent.name for p in path_objs}
+    if len(parent_folders) != 1 or next(iter(parent_folders)) != "入荷実績":
+        return False
+
+    file_names = {p.name for p in path_objs}
+    return "【標準】_入荷.csv" in file_names
+
+def get_non_standard_arrival_file(file_paths):
+    """
+    2ファイルのうち「【標準】_入荷.csv」以外のファイルを返す
+    """
+    for file_path in file_paths:
+        if Path(file_path).name != "【標準】_入荷.csv":
+            return Path(file_path)
+    return None
+
+def append_csv_body_to_product_label(source_file, target_file):
+    """
+    source_fileの1行目をスキップし、2行目以降をtarget_fileへ追記する
+
+    Returns:
+        tuple: (成功可否, 追記行数, エラーメッセージ)
+    """
+    appended_rows = 0
+    encodings = ["cp932", "utf-8"]
+
+    for encoding in encodings:
+        try:
+            with open(source_file, 'r', encoding=encoding, newline='') as infile, \
+                 open(target_file, 'a', encoding='cp932', newline='') as outfile:
+                csv_reader = csv.reader(infile)
+                csv_writer = csv.writer(outfile, quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+
+                # 先頭行（ヘッダー）を常にスキップ
+                next(csv_reader, None)
+
+                for row in csv_reader:
+                    if row and any(cell.strip() for cell in row):
+                        csv_writer.writerow(row)
+                        appended_rows += 1
+
+            return (True, appended_rows, "")
+
+        except UnicodeDecodeError:
+            continue
+        except Exception as e:
+            return (False, appended_rows, str(e))
+
+    return (False, appended_rows, "入力CSVの文字コード判定に失敗しました")
+
+def should_apply_arrival_daily_exception(file_paths):
+    """
+    入荷デイリー処理特例（受注除外ON相当）を適用する条件を満たすか判定する
+    条件:
+      1. 選択CSVが3ファイル以上
+      2. 全ファイル名に「【標準】_入荷_デイリー処理」を含む
+    """
+    if len(file_paths) < 3:
+        return False
+
+    return all("【標準】_入荷_デイリー処理" in Path(p).name for p in file_paths)
+
+def get_first_existing_path(path_candidates):
+    """候補リストから最初に存在するパスを返す"""
+    for path in path_candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+def backup_existing_file(file_path, save_dir):
+    """
+    既存ファイルをバックアップフォルダへ移動する
+    """
+    if not os.path.exists(file_path):
+        return None
+
+    backup_dir = os.path.join(save_dir, "バックアップ")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.basename(file_path)
+    name, ext = os.path.splitext(filename)
+    backup_filename = f"{name}_{timestamp}{ext}"
+    backup_path = os.path.join(backup_dir, backup_filename)
+
+    shutil.move(file_path, backup_path)
+    return backup_path
+
+def process_arrival_csv_for_product_label_exception_on(arrival_csv_path):
+    """
+    ラベルプリンター_製品ラベル用csv作成.py の
+    「受注データによる除外処理ON」相当の処理を実行し、
+    製品ラベル用データファイル.csvをバックアップ後に新規作成する。
+
+    Returns:
+        tuple: (成功可否, 詳細メッセージ, 保存先パス文字列)
+    """
+    try:
+        username = getpass.getuser()
+
+        hatchu_paths = [
+            f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\発注残\\【標準】_発注.csv",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\発注残\\【標準】_発注.csv",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\発注残\\【標準】_発注.csv"
+        ]
+        lot_paths = [
+            f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\ロットナンバー置換一覧\\ロットナンバー置換一覧.csv",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\ロットナンバー置換一覧\\ロットナンバー置換一覧.csv",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\ロットナンバー置換一覧\\ロットナンバー置換一覧.csv"
+        ]
+        juchu_paths = [
+            f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\受注残\\【標準】_受注.csv",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\受注残\\【標準】_受注.csv",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\受注残\\【標準】_受注.csv"
+        ]
+
+        hatchu_path = get_first_existing_path(hatchu_paths)
+        if not hatchu_path:
+            return (False, "発注ファイル（【標準】_発注.csv）が見つかりません", "")
+
+        label_save_path = get_product_label_data_save_path()
+        if label_save_path is None:
+            return (False, "製品ラベル用データファイルの保存先フォルダが見つかりません", "")
+
+        nyuka_df = pd.read_csv(arrival_csv_path, encoding='cp932')
+        extracted_df = pd.DataFrame()
+        extracted_df[''] = [''] * len(nyuka_df)
+        extracted_df['明細_ロット番号'] = nyuka_df['明細_ロット番号']
+        extracted_df['明細_共通項目2'] = nyuka_df['明細_共通項目2'].fillna(0).astype(float).astype(int)
+        extracted_df['発注番号'] = nyuka_df['発注番号']
+        extracted_df['明細_商品コード'] = nyuka_df['明細_商品コード']
+        extracted_df['明細_商品略名'] = nyuka_df['明細_商品略名']
+
+        hatchu_df = pd.read_csv(hatchu_path, encoding='cp932')
+        hatchu_dict = dict(zip(hatchu_df['発注番号'], hatchu_df['受注番号']))
+        juchuban_values = extracted_df['発注番号'].map(hatchu_dict).fillna('')
+        extracted_df = extracted_df.rename(columns={'発注番号': '受注番号'})
+        extracted_df['受注番号'] = juchuban_values
+
+        lot_path = get_first_existing_path(lot_paths)
+        if lot_path:
+            lot_df = pd.read_csv(lot_path, encoding='cp932')
+            new_rows = pd.DataFrame(columns=extracted_df.columns)
+            new_rows[''] = lot_df['Before']
+            new_rows.iloc[:, 1] = lot_df['After']
+            for col in new_rows.columns[2:]:
+                new_rows[col] = ''
+            final_df = pd.concat([extracted_df, new_rows], ignore_index=True)
+        else:
+            final_df = extracted_df
+
+        alpha = len(extracted_df)
+        beta = len(final_df) - 1
+        search_df = final_df.iloc[1:alpha]
+
+        lookup_dict = {}
+        for idx in range(len(search_df)):
+            key = search_df.iloc[idx, 1]
+            if key not in lookup_dict:
+                lookup_dict[key] = search_df.iloc[idx, 2:6].tolist()
+
+        for idx in range(alpha, beta + 1):
+            key_value = final_df.iloc[idx, 1]
+            if key_value in lookup_dict:
+                for i, val in enumerate(lookup_dict[key_value]):
+                    final_df.iloc[idx, i + 2] = val
+
+        col0_str = final_df.iloc[:, 0].astype(str).str.strip()
+        col1_str = final_df.iloc[:, 1].astype(str).str.strip()
+        same_values = col0_str == col1_str
+        cols_2_to_5 = final_df.iloc[:, 2:6].astype(str)
+        has_value = cols_2_to_5.apply(lambda row: any(val.strip() != '' for val in row), axis=1)
+        indices = pd.Series(range(len(final_df)))
+        in_range = (indices >= alpha) & (indices <= beta)
+        rows_to_keep = ~in_range | (has_value & ~same_values)
+        final_df = final_df[rows_to_keep.values].reset_index(drop=True)
+
+        juchu_path = get_first_existing_path(juchu_paths)
+        if juchu_path:
+            juchu_df = pd.read_csv(juchu_path, encoding='cp932', usecols=[0, 126, 270])
+            col2_cleaned = juchu_df.iloc[:, 2].astype(str).str.replace(',', '', regex=False)
+            col2_numeric = pd.to_numeric(col2_cleaned, errors='coerce').fillna(0).astype(int).astype(str)
+            juchu_df['_key'] = juchu_df.iloc[:, 0].astype(str).str.strip() + col2_numeric
+            completed_keys = set(juchu_df.loc[juchu_df.iloc[:, 1] == "完了", '_key'])
+
+            final_df['_key'] = final_df.iloc[:, 3].astype(str).str.strip() + final_df.iloc[:, 2].astype(str).str.strip()
+            final_df = final_df[~final_df['_key'].isin(completed_keys)]
+            final_df = final_df.drop(columns=['_key'])
+
+        cols = list(final_df.columns)
+        if len(cols) >= 3:
+            cols[0] = 'Before_ロット番号'
+            cols[1] = 'After_ロット番号'
+            cols[2] = '行番号'
+        final_df.columns = cols
+
+        mask = final_df['Before_ロット番号'].astype(str).str.strip() == ''
+        if mask.any():
+            deduped = final_df[mask].drop_duplicates(subset=['After_ロット番号', '行番号'], keep='first')
+            final_df = pd.concat([final_df[~mask], deduped], ignore_index=True)
+
+        final_df = final_df.drop_duplicates(subset=final_df.columns[:6], keep='first')
+
+        rows_to_keep = []
+        for _, row in final_df.iterrows():
+            after_lot = str(row['After_ロット番号']).strip()
+            row_num = str(row['行番号']).strip()
+            product_code = str(row['明細_商品コード']).strip()
+            is_noise = (after_lot, row_num, product_code) in [
+                ('08D537181', '16', '146621-59220'),
+                ('08D537181', '0', '146621-59220')
+            ]
+            rows_to_keep.append(not is_noise)
+        final_df = final_df[rows_to_keep]
+
+        save_path_str = str(label_save_path)
+        backup_path = backup_existing_file(save_path_str, str(label_save_path.parent))
+        final_df.to_csv(save_path_str, encoding='cp932', index=False, mode='w', header=True)
+
+        details = f"{len(final_df)}行を書き込みました"
+        if backup_path:
+            details += f"（バックアップ作成: {os.path.basename(backup_path)}）"
+
+        return (True, details, save_path_str)
+
+    except Exception as e:
+        return (False, str(e), "")
+
 def show_filename_dialog():
     """
     tkinterを使用したファイル名選択ダイアログを表示
@@ -1996,6 +2259,15 @@ def merge_csv_files(file_paths):
             outstanding_db_success = True
             purchase_order_data_db_success = True
             arrival_data_db_success = True
+            label_append_attempted = False
+            label_append_success = True
+            label_append_rows = 0
+            label_append_target_path = None
+            label_append_error = ""
+            daily_label_exception_attempted = False
+            daily_label_exception_success = True
+            daily_label_exception_details = ""
+            daily_label_exception_save_path = ""
             shipping_db_creation_success = True
             purchase_price_db_creation_success = True
 
@@ -2021,6 +2293,47 @@ def merge_csv_files(file_paths):
             elif selected_name == "【標準】_入荷":
                 # 入荷データDB作成（CSVと同内容）
                 arrival_data_db_success = create_arrival_data_database(output_file)
+                
+                # 特例条件一致時: 追加側CSVのヘッダーを除いたデータを
+                # 製品ラベル用データファイル.csvへ追記
+                if should_apply_arrival_label_append(file_paths):
+                    label_append_attempted = True
+                    source_file = get_non_standard_arrival_file(file_paths)
+                    label_target_path = get_product_label_data_save_path()
+                    label_append_target_path = str(label_target_path) if label_target_path else None
+
+                    if source_file is None:
+                        label_append_success = False
+                        label_append_error = "追記対象の追加CSVを特定できませんでした"
+                        print("⚠️ 製品ラベル用データ追記をスキップ: 追加CSVが特定できません")
+                    elif label_target_path is None:
+                        label_append_success = False
+                        label_append_error = "製品ラベル用データファイルの保存先が見つかりません"
+                        print("⚠️ 製品ラベル用データ追記をスキップ: 保存先フォルダが見つかりません")
+                    else:
+                        print(f"製品ラベル用データ追記中: {source_file.name} -> {label_target_path.name}")
+                        label_append_success, label_append_rows, label_append_error = append_csv_body_to_product_label(
+                            source_file, label_target_path
+                        )
+                        if label_append_success:
+                            print(f"製品ラベル用データ追記完了: {label_append_rows} 行")
+                        else:
+                            print(f"⚠️ 製品ラベル用データ追記失敗: {label_append_error}")
+
+                # 特例条件一致時: 結合後の【標準】_入荷.csvを入力に、
+                # ラベルプリンター「受注除外ON」相当処理を実行
+                if should_apply_arrival_daily_exception(file_paths):
+                    daily_label_exception_attempted = True
+                    print("入荷デイリー処理特例を実行します（受注除外ON相当）...")
+                    (
+                        daily_label_exception_success,
+                        daily_label_exception_details,
+                        daily_label_exception_save_path
+                    ) = process_arrival_csv_for_product_label_exception_on(output_file)
+                    if daily_label_exception_success:
+                        print(f"入荷デイリー処理特例完了: {daily_label_exception_details}")
+                    else:
+                        print(f"⚠️ 入荷デイリー処理特例失敗: {daily_label_exception_details}")
 
             elif selected_name == "【標準】_出荷":
                 # 出荷情報DB作成
@@ -2097,6 +2410,28 @@ def merge_csv_files(file_paths):
                     success_message += "\n✅ 入荷データDB(arrival_data.db)の作成も完了しました"
                 else:
                     success_message += "\n⚠️ 入荷データDBの作成に失敗しました"
+                
+                if label_append_attempted:
+                    if label_append_success:
+                        success_message += f"\n✅ 製品ラベル用データファイルへ {label_append_rows} 行を追記しました"
+                    else:
+                        success_message += "\n⚠️ 製品ラベル用データファイルへの追記に失敗しました"
+                        if label_append_error:
+                            success_message += f"\n  理由: {label_append_error}"
+                    if label_append_target_path:
+                        success_message += f"\n  追記先: {label_append_target_path}"
+
+                if daily_label_exception_attempted:
+                    if daily_label_exception_success:
+                        success_message += "\n✅ 入荷デイリー処理特例（受注除外ON相当）を実行しました"
+                        if daily_label_exception_details:
+                            success_message += f"\n  結果: {daily_label_exception_details}"
+                    else:
+                        success_message += "\n⚠️ 入荷デイリー処理特例（受注除外ON相当）に失敗しました"
+                        if daily_label_exception_details:
+                            success_message += f"\n  理由: {daily_label_exception_details}"
+                    if daily_label_exception_save_path:
+                        success_message += f"\n  出力先: {daily_label_exception_save_path}"
 
             elif selected_name == "【標準】_出荷":
                 if shipping_db_creation_success:
@@ -2165,7 +2500,7 @@ def main():
         root.destroy()
         return
     
-    print("=== CSVファイル結合プログラム（改良版） ===")
+    print(f"=== CSVファイル結合プログラム v{APP_VERSION}（改良版） ===")
     print(f"現在のユーザー: {getpass.getuser()}")
     print(f"選択されたCSVファイル: {len(csv_files)}個")
     
