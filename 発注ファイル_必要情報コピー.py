@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 # アプリケーションバージョン
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 APP_NAME = "発注ファイル_必要情報コピー"
 
 # 旧担当者案件も残っている可能性があるため、片平両名・荒井氏・酒井氏のコードは暫く残しておく
@@ -69,16 +69,13 @@ def copy_partial_filename_and_path(file_path):
                     special_text = "1014_Wｳｴﾉ_COSCO"
                 else:
                     special_text = "1003_Oﾐﾀﾆ_COSCO"
-            # 国内古宮コード。念の為、海外得意先を条件として追加。過渡期対策。
-            elif special_text_key == "1006" and (
-                check_value in ["63G50", "63G51"] or
-                seventh_eighth_value in ["A104-11", "A104-12"]
-            ):
+            # A104/A114は担当者コード問わず古宮海外
+            elif "A104" in seventh_eighth_value or "A114" in seventh_eighth_value:
+                special_text = "1010_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
+            # 国内古宮コード（63G50/63G51の場合）
+            elif special_text_key == "1006" and check_value in ["63G50", "63G51"]:
                 special_text = "1006_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
-            elif special_text_key == "1010" and (
-                check_value in ["63G50", "63G51"] or
-                seventh_eighth_value in ["A104-11", "A104-12"]
-            ):
+            elif special_text_key == "1010" and check_value in ["63G50", "63G51"]:
                 special_text = "1010_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
             elif seventh_eighth_value in ["A112-11", "A111-11", "A111-12", "A111-13", "A111-14"]:
                 special_text = "1014_Wｳｴﾉ_ｶｲｶﾞｲ"
