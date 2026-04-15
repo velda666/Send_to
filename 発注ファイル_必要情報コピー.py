@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 # アプリケーションバージョン
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 APP_NAME = "発注ファイル_必要情報コピー"
 
 # 旧担当者案件も残っている可能性があるため、片平両名・荒井氏・酒井氏のコードは暫く残しておく
@@ -64,7 +64,7 @@ def copy_partial_filename_and_path(file_path):
                 if "A220" in seventh_eighth_value:
                     special_text = "1003_Oﾐﾀﾆ_COSCO"
                 elif "A114" in seventh_eighth_value:
-                    special_text = "1010_Wﾌﾙﾐﾔ_COSCO"
+                    special_text = "1010_Wﾌﾙﾐﾔ_ｶｲｶﾞｲ"
                 elif "A113" in seventh_eighth_value or "A103" in seventh_eighth_value:
                     special_text = "1014_Wｳｴﾉ_COSCO"
                 else:
