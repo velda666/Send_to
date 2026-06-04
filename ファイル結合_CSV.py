@@ -14,8 +14,30 @@ from tkinter import ttk
 import time
 import threading
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 APP_NAME = "ファイル結合_CSVアプリ"
+
+# 一時的なローカル出力先への切り替えフラグ
+# True: 受注・入荷の結合結果をローカルのDocuments\ファイル結合_一時出力へ保存
+# False: 通常のOneDrive/Teamsフォルダへ保存（本番運用時はFalse）
+USE_LOCAL_OUTPUT = False
+
+def _get_local_output_path(subfolder):
+    """
+    USE_LOCAL_OUTPUT=True のときに使うローカル出力先フォルダを返す。
+
+    Args:
+        subfolder: ローカルベース配下のサブフォルダ名（例: "受注残", "DB\\受注データ"）
+
+    Returns:
+        Path: 作成済みのフォルダパス
+    """
+    username = getpass.getuser()
+    local_path = Path(f"C:\\Users\\{username}\\Documents\\ファイル結合_一時出力") / subfolder
+    local_path.mkdir(parents=True, exist_ok=True)
+    print(f"[LOCAL_OUTPUT] 出力先: {local_path}")
+    return local_path
+
 
 def get_update_folder_path():
     """
@@ -158,12 +180,15 @@ def get_database_path():
 def get_order_database_path():
     """
     受注案件状況確認DBの保存パスを取得する
-    
+
     Returns:
         Path: 存在するデータベースフォルダパス、見つからない場合はNone
     """
+    if USE_LOCAL_OUTPUT:
+        return _get_local_output_path("DB\\受注案件状況確認")
+
     username = getpass.getuser()
-    
+
     db_folder_paths = [
         f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注案件状況確認",
         f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注案件状況確認",
@@ -189,6 +214,9 @@ def get_order_data_database_path():
     Returns:
         Path: 存在するデータベースフォルダパス、見つからない場合はNone
     """
+    if USE_LOCAL_OUTPUT:
+        return _get_local_output_path("DB\\受注データ")
+
     username = getpass.getuser()
 
     db_folder_paths = [
@@ -288,6 +316,9 @@ def get_arrival_data_database_path():
     Returns:
         Path: 存在するデータベースフォルダパス、見つからない場合はNone
     """
+    if USE_LOCAL_OUTPUT:
+        return _get_local_output_path("DB\\入荷データ")
+
     username = getpass.getuser()
 
     db_folder_paths = [
@@ -826,6 +857,88 @@ def create_order_data_database(csv_file_path):
     except Exception as e:
         print(f"⚠️ 受注データDB作成処理でエラーが発生しました: {e}")
         return False
+
+def update_order_backlog_db(csv_path):
+    """
+    受注CSVの内容でOrder backlog.dbを更新する。
+    既存レコード: 売上状況区分名を UPDATE
+    新規レコード: INSERT（DBにあってCSVにないレコードは削除しない）
+
+    Returns:
+        tuple: (成功可否, 処理件数, 詳細メッセージ)
+    """
+    try:
+        username = getpass.getuser()
+        order_db_paths = [
+            f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ\\Order backlog.db",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ\\Order backlog.db",
+            f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ\\Order backlog.db",
+        ]
+        order_db_path = get_first_existing_path(order_db_paths)
+        if not order_db_path:
+            return (False, 0, "Order backlog.dbが見つかりません")
+
+        juchu_df = pd.read_csv(
+            csv_path, encoding='cp932',
+            usecols=['受注番号', '明細_共通項目3', '明細_共通項目2', '売上状況区分名']
+        )
+        juchu_df['明細_共通項目2'] = (
+            juchu_df['明細_共通項目2'].fillna(0).astype(float).astype(int).astype(str)
+        )
+        juchu_df['受注番号'] = juchu_df['受注番号'].astype(str).str.strip()
+        juchu_df['明細_共通項目3'] = juchu_df['明細_共通項目3'].fillna('').astype(str).str.strip()
+        juchu_df['売上状況区分名'] = juchu_df['売上状況区分名'].astype(str).str.strip()
+
+        # WALモードはOneDrive上のファイルと競合する。
+        # SQLiteのWAL設定はDBファイルに永続保存されるため、接続のたびに明示的にDELETEモードへ戻す。
+        con = sqlite3.connect(order_db_path, timeout=30)
+        con.execute("PRAGMA journal_mode=DELETE;")
+        cur = con.cursor()
+
+        # DBの既存キーを取得（受注番号+明細_共通項目2の組み合わせ）
+        # NULLが含まれる場合は空文字に変換してから結合
+        existing_keys = set(
+            (row[0] or '') + '|' + (row[1] or '')
+            for row in cur.execute("SELECT 受注番号, 明細_共通項目2 FROM 受注データ").fetchall()
+        )
+
+        # ベクトル演算でUPDATE/INSERT対象を振り分け（iterrows()より大幅に高速）
+        juchu_df['_key'] = juchu_df['受注番号'] + '|' + juchu_df['明細_共通項目2']
+        mask_existing = juchu_df['_key'].isin(existing_keys)
+
+        update_df = juchu_df[mask_existing]
+        insert_df = juchu_df[~mask_existing]
+
+        update_params = list(zip(update_df['売上状況区分名'], update_df['受注番号'], update_df['明細_共通項目2']))
+        insert_params = list(zip(insert_df['受注番号'], insert_df['明細_共通項目3'], insert_df['明細_共通項目2'], insert_df['売上状況区分名']))
+
+        # インデックスを作成してUPDATEのフルスキャンを防ぐ
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_order_key ON 受注データ (受注番号, 明細_共通項目2)"
+        )
+
+        # UPDATE（既存レコードの売上状況区分名を更新）
+        cur.executemany(
+            "UPDATE 受注データ SET 売上状況区分名 = ? WHERE 受注番号 = ? AND 明細_共通項目2 = ?",
+            update_params
+        )
+        total_updated = con.total_changes
+
+        # INSERT（新規レコードを追加）
+        cur.executemany(
+            "INSERT INTO 受注データ (受注番号, 明細_共通項目3, 明細_共通項目2, 売上状況区分名) VALUES (?, ?, ?, ?)",
+            insert_params
+        )
+        total_inserted = con.total_changes - total_updated
+
+        con.commit()
+        con.close()
+
+        return (True, len(juchu_df),
+                f"CSVの {len(juchu_df):,} 件を処理（更新 {total_updated:,} 件・新規追加 {total_inserted:,} 件）")
+
+    except Exception as e:
+        return (False, 0, str(e))
 
 def init_purchase_order_data_database(db_file, header_columns):
     """発注データデータベースを初期化（CSVヘッダーをカラム名として使用）"""
@@ -1835,7 +1948,15 @@ def get_output_folder(selected_filename):
     # 選択されたファイル名に対応するパス候補を取得
     if selected_filename not in folder_paths:
         return None
-    
+
+    # ローカル出力モード（受注・入荷のみ対象）
+    local_target_map = {
+        "【標準】_受注": "受注残",
+        "【標準】_入荷": "入荷実績",
+    }
+    if USE_LOCAL_OUTPUT and selected_filename in local_target_map:
+        return _get_local_output_path(local_target_map[selected_filename])
+
     # 存在するパスを検索
     for folder_path in folder_paths[selected_filename]:
         if os.path.exists(folder_path):
@@ -1856,6 +1977,9 @@ def get_product_label_data_save_path():
     Returns:
         Path: 保存ファイルパス、見つからない場合はNone
     """
+    if USE_LOCAL_OUTPUT:
+        return _get_local_output_path("製品用ラベル用データ") / "製品ラベル用データファイル.csv"
+
     username = getpass.getuser()
 
     save_dir_candidates = [
@@ -1943,40 +2067,42 @@ def build_product_label_dataframe(arrival_csv_path, exclude_with_juchu):
     """
     username = getpass.getuser()
 
-    hatchu_paths = [
-        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\発注残\\【標準】_発注.csv",
-        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\発注残\\【標準】_発注.csv",
-        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\発注残\\【標準】_発注.csv"
+    order_db_paths = [
+        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ\\Order backlog.db",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ\\Order backlog.db",
+        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\DB\\受注データ\\Order backlog.db"
     ]
     lot_paths = [
         f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\ロットナンバー置換一覧\\ロットナンバー置換一覧.csv",
         f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\ロットナンバー置換一覧\\ロットナンバー置換一覧.csv",
         f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\ロットナンバー置換一覧\\ロットナンバー置換一覧.csv"
     ]
-    juchu_paths = [
-        f"C:\\Users\\{username}\\OneDrive - 東邦ヤンマーテック株式会社\\CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\受注残\\【標準】_受注.csv",
-        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\受注残\\【標準】_受注.csv",
-        f"C:\\Users\\{username}\\東邦ヤンマーテック株式会社\\CR推進本部 - CR推進本部フォルダ\\06_社内管理資料\\miraimiru移行関連\\フォルダ共有テスト\\受注残\\【標準】_受注.csv"
-    ]
 
-    hatchu_path = get_first_existing_path(hatchu_paths)
-    if not hatchu_path:
-        raise RuntimeError("発注ファイル（【標準】_発注.csv）が見つかりません")
+    order_db_path = get_first_existing_path(order_db_paths)
+    if not order_db_path:
+        raise RuntimeError("受注データDB（Order backlog.db）が見つかりません")
 
     nyuka_df = pd.read_csv(arrival_csv_path, encoding='cp932')
+    print(f"[DEBUG] 入荷CSV読込: {os.path.basename(arrival_csv_path)} ({len(nyuka_df):,} 行)")
+
+    # DBから「明細_共通項目3→受注番号」マッピングを取得
+    con = sqlite3.connect(order_db_path)
+    komoku3_df = pd.read_sql("SELECT DISTINCT 明細_共通項目3, 受注番号 FROM 受注データ", con)
+    con.close()
+    komoku3_to_juchuban = dict(zip(
+        komoku3_df['明細_共通項目3'].astype(str).str.strip(),
+        komoku3_df['受注番号'].astype(str).str.strip()
+    ))
+
+    komoku3_values = nyuka_df['明細_共通項目3'].fillna('').astype(str).str.strip()
     extracted_df = pd.DataFrame()
     extracted_df[''] = [''] * len(nyuka_df)
     extracted_df['明細_ロット番号'] = nyuka_df['明細_ロット番号']
     extracted_df['明細_共通項目2'] = nyuka_df['明細_共通項目2'].fillna(0).astype(float).astype(int)
-    extracted_df['発注番号'] = nyuka_df['発注番号']
+    extracted_df['受注番号'] = komoku3_values.map(komoku3_to_juchuban).fillna('')
     extracted_df['明細_商品コード'] = nyuka_df['明細_商品コード']
     extracted_df['明細_商品略名'] = nyuka_df['明細_商品略名']
-
-    hatchu_df = pd.read_csv(hatchu_path, encoding='cp932')
-    hatchu_dict = dict(zip(hatchu_df['発注番号'], hatchu_df['受注番号']))
-    juchuban_values = extracted_df['発注番号'].map(hatchu_dict).fillna('')
-    extracted_df = extracted_df.rename(columns={'発注番号': '受注番号'})
-    extracted_df['受注番号'] = juchuban_values
+    extracted_df['_komoku3'] = komoku3_values
 
     lot_path = get_first_existing_path(lot_paths)
     if lot_path:
@@ -2006,6 +2132,7 @@ def build_product_label_dataframe(arrival_csv_path, exclude_with_juchu):
             for i, val in enumerate(lookup_dict[key_value]):
                 final_df.iloc[idx, i + 2] = val
 
+    _before_lot = len(final_df)
     col0_str = final_df.iloc[:, 0].astype(str).str.strip()
     col1_str = final_df.iloc[:, 1].astype(str).str.strip()
     same_values = col0_str == col1_str
@@ -2015,19 +2142,29 @@ def build_product_label_dataframe(arrival_csv_path, exclude_with_juchu):
     in_range = (indices >= alpha) & (indices <= beta)
     rows_to_keep = ~in_range | (has_value & ~same_values)
     final_df = final_df[rows_to_keep.values].reset_index(drop=True)
+    print(f"[DEBUG] ロット置換余分行除外: {_before_lot:,} → {len(final_df):,} 行（{_before_lot - len(final_df):,} 行除外）")
 
     if exclude_with_juchu:
-        juchu_path = get_first_existing_path(juchu_paths)
-        if juchu_path:
-            juchu_df = pd.read_csv(juchu_path, encoding='cp932', usecols=[0, 126, 270])
-            col2_cleaned = juchu_df.iloc[:, 2].astype(str).str.replace(',', '', regex=False)
-            col2_numeric = pd.to_numeric(col2_cleaned, errors='coerce').fillna(0).astype(int).astype(str)
-            juchu_df['_key'] = juchu_df.iloc[:, 0].astype(str).str.strip() + col2_numeric
-            completed_keys = set(juchu_df.loc[juchu_df.iloc[:, 1] == "完了", '_key'])
+        print(f"[DEBUG] 受注残DB: {order_db_path}")
+        con = sqlite3.connect(order_db_path)
+        completed_df = pd.read_sql(
+            "SELECT 明細_共通項目3, 明細_共通項目2 FROM 受注データ WHERE 売上状況区分名 = '完了'", con)
+        con.close()
+        col2_cleaned = completed_df['明細_共通項目2'].astype(str).str.replace(',', '', regex=False)
+        col2_numeric = pd.to_numeric(col2_cleaned, errors='coerce').fillna(0).astype(int).astype(str)
+        completed_keys = set(
+            completed_df['明細_共通項目3'].astype(str).str.strip() + col2_numeric
+        )
+        print(f"[DEBUG] 受注残DB完了キー数: {len(completed_keys):,} 件")
 
-            final_df['_key'] = final_df.iloc[:, 3].astype(str).str.strip() + final_df.iloc[:, 2].astype(str).str.strip()
-            final_df = final_df[~final_df['_key'].isin(completed_keys)]
-            final_df = final_df.drop(columns=['_key'])
+        _before_juchu = len(final_df)
+        final_df['_key'] = (
+            final_df['_komoku3'].fillna('').astype(str).str.strip()
+            + final_df.iloc[:, 2].astype(str).str.strip()
+        )
+        final_df = final_df[~final_df['_key'].isin(completed_keys)]
+        final_df = final_df.drop(columns=['_key'])
+        print(f"[DEBUG] 受注残除外: {_before_juchu:,} → {len(final_df):,} 行（{_before_juchu - len(final_df):,} 行除外）")
 
     cols = list(final_df.columns)
     if len(cols) >= 3:
@@ -2036,13 +2173,16 @@ def build_product_label_dataframe(arrival_csv_path, exclude_with_juchu):
         cols[2] = '行番号'
     final_df.columns = cols
 
+    _before_dedup = len(final_df)
     mask = final_df['Before_ロット番号'].astype(str).str.strip() == ''
     if mask.any():
         deduped = final_df[mask].drop_duplicates(subset=['After_ロット番号', '行番号'], keep='first')
         final_df = pd.concat([final_df[~mask], deduped], ignore_index=True)
 
     final_df = final_df.drop_duplicates(subset=final_df.columns[:6], keep='first')
+    print(f"[DEBUG] 重複除外: {_before_dedup:,} → {len(final_df):,} 行（{_before_dedup - len(final_df):,} 行除外）")
 
+    _before_noise = len(final_df)
     rows_to_keep = []
     for _, row in final_df.iterrows():
         after_lot = str(row['After_ロット番号']).strip()
@@ -2054,6 +2194,14 @@ def build_product_label_dataframe(arrival_csv_path, exclude_with_juchu):
         ]
         rows_to_keep.append(not is_noise)
     final_df = final_df[rows_to_keep]
+    _noise_excluded = _before_noise - len(final_df)
+    if _noise_excluded > 0:
+        print(f"[DEBUG] ノイズ除外: {_before_noise:,} → {len(final_df):,} 行（{_noise_excluded:,} 行除外）")
+    else:
+        print(f"[DEBUG] ノイズ除外: 対象なし（{_before_noise:,} 行）")
+    if '_komoku3' in final_df.columns:
+        final_df = final_df.drop(columns=['_komoku3'])
+    print(f"[DEBUG] 最終出力行数: {len(final_df):,} 行")
 
     return final_df
 
@@ -2371,6 +2519,8 @@ def merge_csv_files(file_paths):
             employee_update_success = True
             db_creation_success = True
             order_data_db_creation_success = True
+            order_backlog_update_success = True
+            order_backlog_update_details = ""
             order_outstanding_success = True
             outstanding_db_success = True
             purchase_order_data_db_success = True
@@ -2397,7 +2547,16 @@ def merge_csv_files(file_paths):
 
                 # 受注データDB作成（CSVと同内容）
                 order_data_db_creation_success = create_order_data_database(output_file)
-                
+
+                # Order backlog.db の売上状況区分名を更新
+                result = update_order_backlog_db(output_file)
+                order_backlog_update_success = result[0]
+                order_backlog_update_details = result[2]
+                if order_backlog_update_success:
+                    print(f"Order backlog.db 更新完了: {order_backlog_update_details}")
+                else:
+                    print(f"⚠️ Order backlog.db 更新失敗: {order_backlog_update_details}")
+
             elif selected_name == "【標準】_発注":
                 # 発注残ファイル作成と発注情報DB作成
                 csv_success, db_success = process_order_outstanding_csv(output_file)
@@ -2504,6 +2663,11 @@ def merge_csv_files(file_paths):
                     success_message += "\n✅ 受注データDB(order_data.db)の作成も完了しました"
                 else:
                     success_message += "\n⚠️ 受注データDBの作成に失敗しました"
+
+                if order_backlog_update_success:
+                    success_message += f"\n✅ Order backlog.db を更新しました（{order_backlog_update_details}）"
+                else:
+                    success_message += f"\n⚠️ Order backlog.db の更新に失敗しました: {order_backlog_update_details}"
 
             elif selected_name == "【標準】_発注":
                 if order_outstanding_success:
